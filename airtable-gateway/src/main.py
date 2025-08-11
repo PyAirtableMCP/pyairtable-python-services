@@ -70,7 +70,7 @@ app.add_middleware(
 from middleware.auth import AuthMiddleware
 from config import get_settings
 settings = get_settings()
-app.add_middleware(AuthMiddleware, internal_api_key=settings.internal_api_key)
+app.add_middleware(AuthMiddleware, internal_api_key=settings.internal_api_key, jwt_secret=settings.jwt_secret)
 
 # Exception handler
 @app.exception_handler(Exception)

@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     
     # Security
     internal_api_key: str = ""
+    jwt_secret: str = ""
     
     class Config:
         env_file = ".env"
