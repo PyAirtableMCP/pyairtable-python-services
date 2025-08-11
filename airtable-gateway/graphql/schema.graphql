@@ -1,0 +1,981 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.3"
+        import: ["@key", "@shareable", "@provides", "@requires", "@external", "@tag", "@inaccessible"])
+
+"""
+Airtable Base entity representing a connected Airtable base
+"""
+type AirtableBase @key(fields: "id") {
+  id: ID!
+  airtableId: String!
+  name: String!
+  description: String
+  
+  # Workspace association
+  workspaceId: ID! @external
+  workspace: Workspace! @provides(fields: "id name")
+  
+  # Connection details
+  apiKey: String @inaccessible
+  connectionStatus: ConnectionStatus!
+  lastSyncAt: DateTime
+  syncFrequency: SyncFrequency!
+  autoSync: Boolean!
+  
+  # Schema information
+  tables: [AirtableTable!]! @requires(fields: "id")
+  tableCount: Int!
+  recordCount: Int!
+  
+  # Permissions and access
+  permissions: BasePermissions!
+  collaborators: [BaseCollaborator!]!
+  
+  # Metadata
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  createdBy: ID!
+  
+  # Usage statistics
+  usage: BaseUsage! @requires(fields: "id")
+  
+  # Sync settings
+  syncSettings: SyncSettings!
+  webhookUrl: String
+  
+  # Computed fields
+  isConnected: Boolean!
+  lastActivity: DateTime
+  errorCount: Int!
+}
+
+"""
+Connection status for Airtable bases
+"""
+enum ConnectionStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+  SYNCING
+  RATE_LIMITED
+  UNAUTHORIZED
+  NOT_FOUND
+}
+
+"""
+Sync frequency options
+"""
+enum SyncFrequency {
+  REAL_TIME
+  EVERY_5_MINUTES
+  EVERY_15_MINUTES
+  EVERY_30_MINUTES
+  HOURLY
+  DAILY
+  MANUAL
+}
+
+"""
+Airtable Table representing a table within a base
+"""
+type AirtableTable @key(fields: "id") {
+  id: ID!
+  airtableId: String!
+  baseId: ID! @external
+  base: AirtableBase! @provides(fields: "id name")
+  
+  name: String!
+  description: String
+  primaryFieldId: String!
+  
+  # Schema
+  fields: [AirtableField!]! @requires(fields: "id")
+  views: [AirtableView!]! @requires(fields: "id")
+  
+  # Data
+  records: [AirtableRecord!]! @requires(fields: "id")
+  recordCount: Int!
+  
+  # Permissions
+  permissions: TablePermissions!
+  
+  # Metadata
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  lastSyncAt: DateTime
+  
+  # Computed fields
+  fieldCount: Int!
+  viewCount: Int!
+}
+
+"""
+Airtable Field representing a column in a table
+"""
+type AirtableField @key(fields: "id") {
+  id: ID!
+  airtableId: String!
+  tableId: ID! @external
+  table: AirtableTable! @provides(fields: "id name")
+  
+  name: String!
+  type: FieldType!
+  description: String
+  
+  # Field configuration
+  options: FieldOptions
+  
+  # Validation and constraints
+  required: Boolean!
+  unique: Boolean!
+  
+  # Metadata
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  
+  # Computed fields
+  hasData: Boolean!
+  distinctValueCount: Int
+}
+
+"""
+Field types supported by Airtable
+"""
+enum FieldType {
+  SINGLE_LINE_TEXT
+  LONG_TEXT
+  RICH_TEXT
+  ATTACHMENT
+  CHECKBOX
+  MULTIPLE_SELECT
+  SINGLE_SELECT
+  USER
+  DATE
+  PHONE_NUMBER
+  EMAIL
+  URL
+  NUMBER
+  CURRENCY
+  PERCENT
+  DURATION
+  RATING
+  FORMULA
+  ROLLUP
+  COUNT
+  LOOKUP
+  CREATED_TIME
+  LAST_MODIFIED_TIME
+  CREATED_BY
+  LAST_MODIFIED_BY
+  AUTONUMBER
+  BARCODE
+  BUTTON
+}
+
+"""
+Field options configuration (varies by field type)
+"""
+type FieldOptions {
+  # Select field options
+  choices: [SelectChoice!]
+  
+  # Number/Currency options
+  precision: Int
+  symbol: String
+  
+  # Date options
+  dateFormat: String
+  timeFormat: String
+  timeZone: String
+  
+  # Formula options
+  formula: String
+  
+  # Rollup options
+  linkedRecordFieldId: String
+  rollupFieldId: String
+  rollupFunction: String
+  
+  # Lookup options
+  lookupFieldId: String
+  
+  # Rating options
+  icon: String
+  max: Int
+  
+  # Attachment options
+  allowedTypes: [String!]
+  maxSize: Int
+}
+
+"""
+Select field choice option
+"""
+type SelectChoice {
+  id: String!
+  name: String!
+  color: String
+}
+
+"""
+Airtable View representing a filtered/sorted view of a table
+"""
+type AirtableView @key(fields: "id") {
+  id: ID!
+  airtableId: String!
+  tableId: ID! @external
+  table: AirtableTable! @provides(fields: "id name")
+  
+  name: String!
+  type: ViewType!
+  description: String
+  
+  # View configuration
+  filterConditions: [FilterCondition!]!
+  sortFields: [SortField!]!
+  groupFields: [GroupField!]!
+  hiddenFields: [String!]!
+  fieldOrder: [String!]!
+  
+  # Access control
+  permissions: ViewPermissions!
+  isPublic: Boolean!
+  shareUrl: String
+  
+  # Metadata
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  
+  # Data access
+  records(
+    limit: Int = 100
+    offset: Int = 0
+    filters: [RecordFilter!]
+    sort: [RecordSort!]
+  ): [AirtableRecord!]!
+}
+
+"""
+View types
+"""
+enum ViewType {
+  GRID
+  FORM
+  CALENDAR
+  GALLERY
+  KANBAN
+  TIMELINE
+  GANTT
+}
+
+"""
+Filter condition for views
+"""
+type FilterCondition {
+  field: String!
+  operator: FilterOperator!
+  value: JSON
+}
+
+"""
+Filter operators
+"""
+enum FilterOperator {
+  EQUALS
+  NOT_EQUALS
+  CONTAINS
+  NOT_CONTAINS
+  GREATER_THAN
+  LESS_THAN
+  GREATER_THAN_OR_EQUAL
+  LESS_THAN_OR_EQUAL
+  IS_EMPTY
+  IS_NOT_EMPTY
+  STARTS_WITH
+  ENDS_WITH
+  IS_ANY_OF
+  IS_NONE_OF
+  IS_BEFORE
+  IS_AFTER
+  IS_ON_OR_BEFORE
+  IS_ON_OR_AFTER
+  IS_WITHIN
+}
+
+"""
+Sort field configuration
+"""
+type SortField {
+  field: String!
+  direction: SortDirection!
+}
+
+"""
+Group field configuration
+"""
+type GroupField {
+  field: String!
+  direction: SortDirection!
+}
+
+"""
+Sort directions
+"""
+enum SortDirection {
+  ASC
+  DESC
+}
+
+"""
+Airtable Record representing a row in a table
+"""
+type AirtableRecord @key(fields: "id") {
+  id: ID!
+  airtableId: String!
+  tableId: ID! @external
+  table: AirtableTable! @provides(fields: "id name")
+  
+  # Record data
+  fields: JSON!
+  
+  # Metadata
+  createdTime: DateTime!
+  lastModifiedTime: DateTime
+  createdBy: String
+  lastModifiedBy: String
+  
+  # Computed fields
+  fieldValues: [FieldValue!]!
+  linkedRecords: [LinkedRecord!]!
+  attachments: [Attachment!]!
+}
+
+"""
+Field value with type information
+"""
+type FieldValue {
+  fieldId: String!
+  fieldName: String!
+  fieldType: FieldType!
+  value: JSON
+  displayValue: String
+}
+
+"""
+Linked record reference
+"""
+type LinkedRecord {
+  recordId: String!
+  displayValue: String
+  tableId: String!
+  tableName: String!
+}
+
+"""
+File attachment
+"""
+type Attachment {
+  id: String!
+  filename: String!
+  url: String!
+  type: String!
+  size: Int!
+  thumbnails: [Thumbnail!]
+}
+
+"""
+Attachment thumbnail
+"""
+type Thumbnail {
+  url: String!
+  width: Int!
+  height: Int!
+}
+
+"""
+Base permissions configuration
+"""
+type BasePermissions {
+  canRead: Boolean!
+  canWrite: Boolean!
+  canDelete: Boolean!
+  canShare: Boolean!
+  canAdministerBase: Boolean!
+  canCreateTables: Boolean!
+  canDeleteTables: Boolean!
+  canEditSchema: Boolean!
+  canManageWebhooks: Boolean!
+}
+
+"""
+Table permissions configuration
+"""
+type TablePermissions {
+  canRead: Boolean!
+  canWrite: Boolean!
+  canDelete: Boolean!
+  canCreateRecords: Boolean!
+  canUpdateRecords: Boolean!
+  canDeleteRecords: Boolean!
+  canCreateFields: Boolean!
+  canUpdateFields: Boolean!
+  canDeleteFields: Boolean!
+  canCreateViews: Boolean!
+  canUpdateViews: Boolean!
+  canDeleteViews: Boolean!
+}
+
+"""
+View permissions configuration
+"""
+type ViewPermissions {
+  canRead: Boolean!
+  canWrite: Boolean!
+  canShare: Boolean!
+  canCopy: Boolean!
+  canExport: Boolean!
+}
+
+"""
+Base collaborator information
+"""
+type BaseCollaborator {
+  userId: ID!
+  user: User! @provides(fields: "id email firstName lastName")
+  role: CollaboratorRole!
+  permissions: BasePermissions!
+  addedAt: DateTime!
+  addedBy: ID!
+}
+
+"""
+Collaborator roles
+"""
+enum CollaboratorRole {
+  OWNER
+  CREATOR
+  EDITOR
+  COMMENTER
+  READ_ONLY
+}
+
+"""
+Base usage statistics
+"""
+type BaseUsage {
+  recordCount: Int!
+  attachmentCount: Int!
+  storageUsed: Int!
+  apiCallsThisMonth: Int!
+  lastApiCall: DateTime
+  
+  # Usage by table
+  tableUsage: [TableUsage!]!
+  
+  # Historical data
+  recordCountHistory: [UsageDataPoint!]!
+  apiCallHistory: [UsageDataPoint!]!
+}
+
+"""
+Table usage statistics
+"""
+type TableUsage {
+  tableId: String!
+  tableName: String!
+  recordCount: Int!
+  fieldCount: Int!
+  viewCount: Int!
+  lastActivity: DateTime
+}
+
+"""
+Usage data point for historical tracking
+"""
+type UsageDataPoint {
+  timestamp: DateTime!
+  value: Int!
+}
+
+"""
+Sync settings configuration
+"""
+type SyncSettings {
+  enabled: Boolean!
+  frequency: SyncFrequency!
+  syncDirection: SyncDirection!
+  conflictResolution: ConflictResolution!
+  
+  # Field mapping
+  fieldMappings: [FieldMapping!]!
+  
+  # Filters
+  syncFilters: [SyncFilter!]!
+  
+  # Webhooks
+  webhookEnabled: Boolean!
+  webhookEvents: [WebhookEvent!]!
+  
+  # Error handling
+  maxRetries: Int!
+  retryDelay: Int!
+  skipErrors: Boolean!
+}
+
+"""
+Sync direction options
+"""
+enum SyncDirection {
+  PULL_ONLY
+  PUSH_ONLY
+  BIDIRECTIONAL
+}
+
+"""
+Conflict resolution strategies
+"""
+enum ConflictResolution {
+  AIRTABLE_WINS
+  PYAIRTABLE_WINS
+  MANUAL_REVIEW
+  MERGE_FIELDS
+}
+
+"""
+Field mapping for sync
+"""
+type FieldMapping {
+  airtableField: String!
+  pyairtableField: String!
+  transformation: String
+  required: Boolean!
+}
+
+"""
+Sync filter configuration
+"""
+type SyncFilter {
+  field: String!
+  operator: FilterOperator!
+  value: JSON!
+}
+
+"""
+Webhook events
+"""
+enum WebhookEvent {
+  RECORD_CREATED
+  RECORD_UPDATED
+  RECORD_DELETED
+  FIELD_CREATED
+  FIELD_UPDATED
+  FIELD_DELETED
+  TABLE_CREATED
+  TABLE_UPDATED
+  TABLE_DELETED
+  VIEW_CREATED
+  VIEW_UPDATED
+  VIEW_DELETED
+}
+
+"""
+Sync operation result
+"""
+type SyncResult {
+  success: Boolean!
+  recordsProcessed: Int!
+  recordsCreated: Int!
+  recordsUpdated: Int!
+  recordsDeleted: Int!
+  recordsSkipped: Int!
+  errors: [SyncError!]!
+  duration: Int!
+  timestamp: DateTime!
+}
+
+"""
+Sync error information
+"""
+type SyncError {
+  recordId: String
+  error: String!
+  field: String
+  severity: ErrorSeverity!
+}
+
+"""
+Error severity levels
+"""
+enum ErrorSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+# External entity references
+type Workspace @key(fields: "id") {
+  id: ID! @external
+  name: String @external
+}
+
+type User @key(fields: "id") {
+  id: ID! @external
+  email: String @external
+  firstName: String @external
+  lastName: String @external
+}
+
+# Scalars
+scalar DateTime
+scalar JSON
+
+# Input Types
+input ConnectBaseInput {
+  workspaceId: ID!
+  airtableBaseId: String!
+  apiKey: String!
+  name: String
+  syncFrequency: SyncFrequency = MANUAL
+  autoSync: Boolean = false
+  syncSettings: SyncSettingsInput
+}
+
+input UpdateBaseInput {
+  name: String
+  description: String
+  syncFrequency: SyncFrequency
+  autoSync: Boolean
+  syncSettings: SyncSettingsInput
+}
+
+input SyncSettingsInput {
+  enabled: Boolean
+  frequency: SyncFrequency
+  syncDirection: SyncDirection
+  conflictResolution: ConflictResolution
+  fieldMappings: [FieldMappingInput!]
+  syncFilters: [SyncFilterInput!]
+  webhookEnabled: Boolean
+  webhookEvents: [WebhookEvent!]
+  maxRetries: Int
+  retryDelay: Int
+  skipErrors: Boolean
+}
+
+input FieldMappingInput {
+  airtableField: String!
+  pyairtableField: String!
+  transformation: String
+  required: Boolean = false
+}
+
+input SyncFilterInput {
+  field: String!
+  operator: FilterOperator!
+  value: JSON!
+}
+
+input CreateRecordInput {
+  tableId: ID!
+  fields: JSON!
+}
+
+input UpdateRecordInput {
+  recordId: ID!
+  fields: JSON!
+}
+
+input RecordFilter {
+  field: String!
+  operator: FilterOperator!
+  value: JSON
+}
+
+input RecordSort {
+  field: String!
+  direction: SortDirection!
+}
+
+input CreateViewInput {
+  tableId: ID!
+  name: String!
+  type: ViewType!
+  filterConditions: [FilterConditionInput!]
+  sortFields: [SortFieldInput!]
+  groupFields: [GroupFieldInput!]
+  hiddenFields: [String!]
+  fieldOrder: [String!]
+}
+
+input FilterConditionInput {
+  field: String!
+  operator: FilterOperator!
+  value: JSON
+}
+
+input SortFieldInput {
+  field: String!
+  direction: SortDirection!
+}
+
+input GroupFieldInput {
+  field: String!
+  direction: SortDirection!
+}
+
+input CreateFieldInput {
+  tableId: ID!
+  name: String!
+  type: FieldType!
+  description: String
+  options: FieldOptionsInput
+  required: Boolean = false
+  unique: Boolean = false
+}
+
+input FieldOptionsInput {
+  choices: [SelectChoiceInput!]
+  precision: Int
+  symbol: String
+  dateFormat: String
+  timeFormat: String
+  timeZone: String
+  formula: String
+  linkedRecordFieldId: String
+  rollupFieldId: String
+  rollupFunction: String
+  lookupFieldId: String
+  icon: String
+  max: Int
+  allowedTypes: [String!]
+  maxSize: Int
+}
+
+input SelectChoiceInput {
+  id: String
+  name: String!
+  color: String
+}
+
+input BaseSearchFilters {
+  workspaceId: ID
+  connectionStatus: ConnectionStatus
+  syncFrequency: SyncFrequency
+  hasAutoSync: Boolean
+  createdAfter: DateTime
+  createdBefore: DateTime
+}
+
+input PaginationInput {
+  limit: Int = 20
+  offset: Int = 0
+  cursor: String
+}
+
+input SortInput {
+  field: String!
+  direction: SortDirection = ASC
+}
+
+# Response Types
+type PaginatedBases {
+  bases: [AirtableBase!]!
+  totalCount: Int!
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  cursor: String
+}
+
+type PaginatedRecords {
+  records: [AirtableRecord!]!
+  totalCount: Int!
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  cursor: String
+}
+
+type AirtableStatistics {
+  totalBases: Int!
+  connectedBases: Int!
+  totalTables: Int!
+  totalRecords: Int!
+  totalFields: Int!
+  syncOperationsToday: Int!
+  apiCallsToday: Int!
+  storageUsed: Int!
+  errorRate: Float!
+}
+
+type BulkOperationResult {
+  success: Boolean!
+  processed: Int!
+  succeeded: Int!
+  failed: Int!
+  errors: [BulkError!]!
+}
+
+type BulkError {
+  index: Int!
+  recordId: String
+  error: String!
+}
+
+# Queries
+type Query {
+  """Get Airtable base by ID"""
+  airtableBase(id: ID!): AirtableBase
+
+  """Get Airtable bases by IDs (for DataLoader)"""
+  airtableBases(ids: [ID!]!): [AirtableBase]!
+
+  """Get bases by workspace"""
+  workspaceAirtableBases(
+    workspaceId: ID!
+    pagination: PaginationInput
+    sort: SortInput
+  ): PaginatedBases!
+
+  """Search Airtable bases"""
+  searchAirtableBases(
+    query: String
+    filters: BaseSearchFilters
+    pagination: PaginationInput
+    sort: SortInput
+  ): PaginatedBases!
+
+  """Get table by ID"""
+  airtableTable(id: ID!): AirtableTable
+
+  """Get tables for a base"""
+  baseTables(
+    baseId: ID!
+    pagination: PaginationInput
+  ): [AirtableTable!]!
+
+  """Get records from table or view"""
+  airtableRecords(
+    tableId: ID
+    viewId: ID
+    filters: [RecordFilter!]
+    sort: [RecordSort!]
+    pagination: PaginationInput
+  ): PaginatedRecords!
+
+  """Get single record by ID"""
+  airtableRecord(id: ID!): AirtableRecord
+
+  """Get field by ID"""
+  airtableField(id: ID!): AirtableField
+
+  """Get view by ID"""
+  airtableView(id: ID!): AirtableView
+
+  """Get base schema (tables, fields, views)"""
+  baseSchema(baseId: ID!): AirtableBase
+
+  """Get sync history for base"""
+  baseSyncHistory(
+    baseId: ID!
+    pagination: PaginationInput
+  ): [SyncResult!]!
+
+  """Get Airtable statistics"""
+  airtableStatistics(workspaceId: ID): AirtableStatistics!
+
+  """Test Airtable connection"""
+  testAirtableConnection(apiKey: String!, baseId: String!): Boolean!
+
+  """Get available Airtable bases for API key"""
+  discoverAirtableBases(apiKey: String!): [DiscoveredBase!]!
+}
+
+type DiscoveredBase {
+  id: String!
+  name: String!
+  permissionLevel: String!
+}
+
+# Mutations
+type Mutation {
+  """Connect Airtable base to workspace"""
+  connectAirtableBase(input: ConnectBaseInput!): AirtableBase! @auth
+
+  """Update Airtable base configuration"""
+  updateAirtableBase(id: ID!, input: UpdateBaseInput!): AirtableBase! @auth
+
+  """Disconnect Airtable base"""
+  disconnectAirtableBase(id: ID!): Boolean! @auth
+
+  """Sync Airtable base data"""
+  syncAirtableBase(id: ID!): SyncResult! @auth
+
+  """Create record in Airtable table"""
+  createAirtableRecord(input: CreateRecordInput!): AirtableRecord! @auth
+
+  """Update record in Airtable table"""
+  updateAirtableRecord(input: UpdateRecordInput!): AirtableRecord! @auth
+
+  """Delete record from Airtable table"""
+  deleteAirtableRecord(id: ID!): Boolean! @auth
+
+  """Bulk create records"""
+  bulkCreateRecords(tableId: ID!, records: [JSON!]!): BulkOperationResult! @auth
+
+  """Bulk update records"""
+  bulkUpdateRecords(updates: [UpdateRecordInput!]!): BulkOperationResult! @auth
+
+  """Bulk delete records"""
+  bulkDeleteRecords(ids: [ID!]!): BulkOperationResult! @auth
+
+  """Create new field in table"""
+  createAirtableField(input: CreateFieldInput!): AirtableField! @auth
+
+  """Update field configuration"""
+  updateAirtableField(id: ID!, input: CreateFieldInput!): AirtableField! @auth
+
+  """Delete field from table"""
+  deleteAirtableField(id: ID!): Boolean! @auth
+
+  """Create new view in table"""
+  createAirtableView(input: CreateViewInput!): AirtableView! @auth
+
+  """Update view configuration"""
+  updateAirtableView(id: ID!, input: CreateViewInput!): AirtableView! @auth
+
+  """Delete view from table"""
+  deleteAirtableView(id: ID!): Boolean! @auth
+
+  """Export table data"""
+  exportTableData(tableId: ID!, format: ExportFormat!): String! @auth
+
+  """Import data into table"""
+  importTableData(tableId: ID!, data: String!, format: ImportFormat!): BulkOperationResult! @auth
+}
+
+enum ExportFormat {
+  CSV
+  JSON
+  XLSX
+}
+
+enum ImportFormat {
+  CSV
+  JSON
+  XLSX
+}
+
+# Subscriptions
+type Subscription {
+  """Subscribe to record changes in a table"""
+  airtableRecordChanged(tableId: ID!): AirtableRecord! @auth
+
+  """Subscribe to base sync events"""
+  baseSyncUpdated(baseId: ID!): SyncResult! @auth
+
+  """Subscribe to schema changes in a base"""
+  baseSchemaChanged(baseId: ID!): AirtableBase! @auth
+}
+
+# Directives
+directive @auth(requires: UserRole) on FIELD_DEFINITION

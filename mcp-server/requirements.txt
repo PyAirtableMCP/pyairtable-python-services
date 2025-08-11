@@ -1,0 +1,37 @@
+fastapi==0.104.1
+uvicorn==0.24.0
+python-dotenv==1.0.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+httpx==0.25.2
+redis==5.0.1
+prometheus-client==0.19.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+alembic==1.13.0
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+
+# OpenTelemetry dependencies
+opentelemetry-api==1.21.0
+opentelemetry-sdk==1.21.0
+opentelemetry-exporter-otlp==1.21.0
+opentelemetry-exporter-jaeger==1.21.0
+opentelemetry-instrumentation==0.42b0
+opentelemetry-instrumentation-fastapi==0.42b0
+opentelemetry-instrumentation-httpx==0.42b0
+opentelemetry-instrumentation-redis==0.42b0
+opentelemetry-instrumentation-sqlalchemy==0.42b0
+opentelemetry-instrumentation-asyncpg==0.42b0
+opentelemetry-instrumentation-logging==0.42b0
+opentelemetry-instrumentation-system-metrics==0.42b0
+opentelemetry-distro==0.42b0
+opentelemetry-propagator-b3==1.21.0
+opentelemetry-propagator-jaeger==1.21.0
+opentelemetry-semantic-conventions==0.42b0
+
+# Structured logging for Loki integration
+structlog==23.2.0
