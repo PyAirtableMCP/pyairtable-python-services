@@ -7,7 +7,7 @@ import httpx
 from redis import asyncio as aioredis
 import hashlib
 
-from ..config import get_settings
+from config import get_settings
 
 
 class AirtableService:
