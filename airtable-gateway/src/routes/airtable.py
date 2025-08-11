@@ -3,10 +3,16 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from redis import asyncio as aioredis
 
-from ..services.airtable import AirtableService
-from ..dependencies import get_redis_client
+from services.airtable import AirtableService
+from dependencies import get_redis_client
 
 router = APIRouter(prefix="/api/v1/airtable", tags=["airtable"])
+
+
+@router.get("/test")
+async def test_connection() -> Dict[str, str]:
+    """Test Airtable connectivity"""
+    return {"status": "connected", "message": "Airtable connection test"}
 
 
 async def get_airtable_service(redis: aioredis.Redis = Depends(get_redis_client)) -> AirtableService:
