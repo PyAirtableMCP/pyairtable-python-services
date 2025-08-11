@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
+from routes.chat import router as chat_router
 
 # Create FastAPI app
 app = FastAPI(
@@ -21,6 +22,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(chat_router, tags=["chat"])
 
 # Root endpoint
 @app.get("/")
