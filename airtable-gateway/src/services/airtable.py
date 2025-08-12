@@ -65,26 +65,53 @@ class AirtableService:
         
         # Rate limiting
         async with self._rate_limiter:
-            async with httpx.AsyncClient(timeout=self.settings.airtable_timeout) as client:
-                response = await client.request(
-                    method=method,
-                    url=f"{self.base_url}/{path}",
-                    headers=self.headers,
-                    params=params,
-                    json=data
-                )
-                
-                if response.status_code >= 400:
-                    error_data = response.json()
-                    raise Exception(f"Airtable API error: {error_data}")
-                
-                result = response.json()
-                
-                # Cache successful GET requests
-                if method == "GET" and use_cache:
-                    await self._set_cache(cache_key, result)
-                
-                return result
+            try:
+                async with httpx.AsyncClient(timeout=self.settings.airtable_timeout) as client:
+                    response = await client.request(
+                        method=method,
+                        url=f"{self.base_url}/{path}",
+                        headers=self.headers,
+                        params=params,
+                        json=data
+                    )
+                    
+                    if response.status_code >= 400:
+                        error_data = {}
+                        try:
+                            error_data = response.json()
+                        except:
+                            error_data = {"error": {"type": "UNKNOWN_ERROR", "message": response.text}}
+                        
+                        # Enhanced error handling with specific error types
+                        if response.status_code == 401:
+                            raise Exception(f"Authentication failed: Invalid API token")
+                        elif response.status_code == 403:
+                            raise Exception(f"Access denied: Insufficient permissions for {path}")
+                        elif response.status_code == 404:
+                            raise Exception(f"Resource not found: {path}")
+                        elif response.status_code == 422:
+                            error_msg = error_data.get('error', {}).get('message', 'Validation error')
+                            raise Exception(f"Validation error: {error_msg}")
+                        elif response.status_code == 429:
+                            raise Exception(f"Rate limit exceeded. Please try again later.")
+                        else:
+                            error_msg = error_data.get('error', {}).get('message', 'Unknown error')
+                            raise Exception(f"Airtable API error ({response.status_code}): {error_msg}")
+                    
+                    result = response.json()
+                    
+                    # Transform and normalize the response
+                    normalized_result = self._normalize_response(result)
+                    
+                    # Cache successful GET requests
+                    if method == "GET" and use_cache:
+                        await self._set_cache(cache_key, normalized_result)
+                    
+                    return normalized_result
+            except httpx.TimeoutException:
+                raise Exception(f"Request timeout: Airtable API is not responding")
+            except httpx.RequestError as e:
+                raise Exception(f"Network error: Unable to connect to Airtable API - {str(e)}")
     
     async def list_bases(self) -> List[Dict[str, Any]]:
         """List all accessible bases"""
@@ -193,3 +220,83 @@ class AirtableService:
                     await self.redis.delete(*keys)
                 if cursor == 0:
                     break
+    
+    def _normalize_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize Airtable API responses for consistent structure"""
+        if not isinstance(data, dict):
+            return data
+            
+        # Handle different response types
+        if 'records' in data:
+            # List records response
+            return {
+                'records': [self._normalize_record(record) for record in data.get('records', [])],
+                'offset': data.get('offset'),
+                'total': len(data.get('records', [])),
+                'hasMore': bool(data.get('offset'))
+            }
+        elif 'bases' in data:
+            # List bases response
+            return {
+                'bases': [self._normalize_base(base) for base in data.get('bases', [])],
+                'total': len(data.get('bases', []))
+            }
+        elif 'tables' in data:
+            # Base schema response
+            return {
+                'tables': [self._normalize_table(table) for table in data.get('tables', [])],
+                'total': len(data.get('tables', []))
+            }
+        elif 'id' in data and 'fields' in data:
+            # Single record response
+            return self._normalize_record(data)
+        else:
+            # Pass through other responses
+            return data
+    
+    def _normalize_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize a single record"""
+        return {
+            'id': record.get('id'),
+            'fields': record.get('fields', {}),
+            'createdTime': record.get('createdTime'),
+            'lastModified': record.get('createdTime')  # Airtable doesn't provide lastModified
+        }
+    
+    def _normalize_base(self, base: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize a base object"""
+        return {
+            'id': base.get('id'),
+            'name': base.get('name'),
+            'permissionLevel': base.get('permissionLevel', 'read')
+        }
+    
+    def _normalize_table(self, table: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize a table object"""
+        return {
+            'id': table.get('id'),
+            'name': table.get('name'),
+            'primaryFieldId': table.get('primaryFieldId'),
+            'fields': [self._normalize_field(field) for field in table.get('fields', [])],
+            'views': [self._normalize_view(view) for view in table.get('views', [])],
+            'description': table.get('description')
+        }
+    
+    def _normalize_field(self, field: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize a field object"""
+        return {
+            'id': field.get('id'),
+            'name': field.get('name'),
+            'type': field.get('type'),
+            'options': field.get('options', {}),
+            'description': field.get('description')
+        }
+    
+    def _normalize_view(self, view: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize a view object"""
+        return {
+            'id': view.get('id'),
+            'name': view.get('name'),
+            'type': view.get('type'),
+            'visibleFieldIds': view.get('visibleFieldIds', [])
+        }
