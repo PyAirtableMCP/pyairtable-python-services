@@ -1,0 +1,323 @@
+name: Python Services CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.changes.outputs.services }}
+      airtable-gateway: ${{ steps.changes.outputs.airtable-gateway }}
+      llm-orchestrator: ${{ steps.changes.outputs.llm-orchestrator }}
+      mcp-server: ${{ steps.changes.outputs.mcp-server }}
+      analytics-service: ${{ steps.changes.outputs.analytics-service }}
+      audit-service: ${{ steps.changes.outputs.audit-service }}
+      chat-service: ${{ steps.changes.outputs.chat-service }}
+      embedding-service: ${{ steps.changes.outputs.embedding-service }}
+      formula-engine: ${{ steps.changes.outputs.formula-engine }}
+      schema-service: ${{ steps.changes.outputs.schema-service }}
+      semantic-search: ${{ steps.changes.outputs.semantic-search }}
+      workflow-engine: ${{ steps.changes.outputs.workflow-engine }}
+      ai-processing-service: ${{ steps.changes.outputs.ai-processing-service }}
+      shared: ${{ steps.changes.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            services:
+              - '**/requirements.txt'
+              - '**/src/**'
+              - '**/tests/**'
+              - 'conftest.py'
+              - 'pytest.ini'
+            airtable-gateway:
+              - 'airtable-gateway/**'
+            llm-orchestrator:
+              - 'llm-orchestrator/**'
+            mcp-server:
+              - 'mcp-server/**'
+            analytics-service:
+              - 'analytics-service/**'
+            audit-service:
+              - 'audit-service/**'
+            chat-service:
+              - 'chat-service/**'
+            embedding-service:
+              - 'embedding-service/**'
+            formula-engine:
+              - 'formula-engine/**'
+            schema-service:
+              - 'schema-service/**'
+            semantic-search:
+              - 'semantic-search/**'
+            workflow-engine:
+              - 'workflow-engine/**'
+            ai-processing-service:
+              - 'ai-processing-service/**'
+            shared:
+              - 'shared/**'
+
+  lint-and-format:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.services == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install linting tools
+        run: |
+          pip install black flake8 isort mypy bandit safety
+      
+      - name: Run Black (code formatting)
+        run: |
+          black --check --diff .
+      
+      - name: Run isort (import sorting)
+        run: |
+          isort --check-only --diff .
+      
+      - name: Run Flake8 (linting)
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      
+      - name: Run Bandit (security linting)
+        run: |
+          bandit -r . -f json || true
+
+  test-service:
+    name: Test Service
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.services == 'true'
+    strategy:
+      matrix:
+        service:
+          - airtable-gateway
+          - llm-orchestrator
+          - mcp-server
+          - analytics-service
+          - audit-service
+          - chat-service
+          - embedding-service
+          - formula-engine
+          - schema-service
+          - semantic-search
+          - workflow-engine
+          - ai-processing-service
+      fail-fast: false
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Check if service exists
+        id: check-service
+        run: |
+          if [ -d "${{ matrix.service }}" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Install dependencies
+        if: steps.check-service.outputs.exists == 'true'
+        run: |
+          cd ${{ matrix.service }}
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          fi
+          # Install test dependencies
+          pip install pytest pytest-asyncio pytest-cov pytest-mock
+      
+      - name: Install shared dependencies
+        if: steps.check-service.outputs.exists == 'true'
+        run: |
+          if [ -f "shared/telemetry_requirements.txt" ]; then
+            pip install -r shared/telemetry_requirements.txt
+          fi
+      
+      - name: Run unit tests
+        if: steps.check-service.outputs.exists == 'true'
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-jwt-secret-key-for-testing-purposes-only
+          API_KEY: test-api-key
+          ENVIRONMENT: test
+        run: |
+          cd ${{ matrix.service }}
+          if [ -d "tests" ] && [ "$(ls -A tests)" ]; then
+            pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
+          else
+            echo "No tests found for ${{ matrix.service }}"
+          fi
+      
+      - name: Upload coverage
+        if: steps.check-service.outputs.exists == 'true'
+        uses: codecov/codecov-action@v3
+        with:
+          file: ${{ matrix.service }}/coverage.xml
+          flags: ${{ matrix.service }}
+          name: ${{ matrix.service }}-coverage
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [lint-and-format, test-service]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: integration_test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-asyncio pytest-cov httpx
+          # Install dependencies for key services
+          for service in airtable-gateway llm-orchestrator mcp-server; do
+            if [ -f "$service/requirements.txt" ]; then
+              pip install -r "$service/requirements.txt"
+            fi
+          done
+      
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/integration_test_db
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-jwt-secret-key-for-integration-testing
+          API_KEY: test-api-key
+          ENVIRONMENT: test
+        run: |
+          if [ -d "tests" ] && [ -f "tests/unit/test_auth_service.py" ]; then
+            pytest tests/ -v -m "integration" --cov=. --cov-report=xml || true
+          else
+            echo "No integration tests found"
+          fi
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.services == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install security tools
+        run: |
+          pip install safety bandit
+      
+      - name: Run Safety (dependency vulnerability check)
+        run: |
+          for service in */; do
+            if [ -f "$service/requirements.txt" ]; then
+              echo "Checking $service..."
+              safety check -r "$service/requirements.txt" || true
+            fi
+          done
+      
+      - name: Run Bandit (security linting)
+        run: |
+          bandit -r . -f json -o bandit-report.json || true
+      
+      - name: Upload security report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-report
+          path: bandit-report.json
+
+  build-status:
+    name: Build Status Check
+    runs-on: ubuntu-latest
+    needs: [lint-and-format, test-service, integration-tests, security-scan]
+    if: always()
+    steps:
+      - name: Check overall status
+        run: |
+          if [[ "${{ needs.lint-and-format.result }}" == "failure" || \
+                "${{ needs.test-service.result }}" == "failure" ]]; then
+            echo "Critical tests failed"
+            exit 1
+          fi
+          echo "All critical tests passed"
