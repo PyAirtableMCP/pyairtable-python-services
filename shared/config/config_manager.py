@@ -51,7 +51,7 @@ class BaseAppConfig(BaseSettings):
     
     # Security
     api_key_required: bool = Field(default=True, env="API_KEY_REQUIRED")
-    jwt_secret: str = Field(default="changeme", env="JWT_SECRET")
+    jwt_secret: str = Field(env="JWT_SECRET")
     jwt_algorithm: str = Field(default="HS256", env="JWT_ALGORITHM")
     jwt_expiry: str = Field(default="24h", env="JWT_EXPIRY")
     

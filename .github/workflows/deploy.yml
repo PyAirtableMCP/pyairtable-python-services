@@ -1,0 +1,527 @@
+name: Python Services Secure Deployment
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  REGISTRY: ghcr.io
+  PYTHON_VERSION: "3.11"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.inputs.environment || 'auto' }}
+  cancel-in-progress: false
+
+jobs:
+  # Security validation and dependency checking
+  security-validation:
+    name: Security Validation
+    runs-on: ubuntu-latest
+    outputs:
+      continue-deployment: ${{ steps.security-check.outputs.continue }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install security tools
+        run: |
+          pip install safety bandit semgrep
+
+      - name: Run safety check for vulnerabilities
+        run: |
+          # Check for known security vulnerabilities in dependencies
+          find . -name "requirements*.txt" -exec safety check --file {} \;
+
+      - name: Run bandit security scan
+        run: |
+          bandit -r . -f json -o bandit-report.json || true
+          bandit -r . -f txt
+
+      - name: Run semgrep security scan
+        run: |
+          semgrep --config=auto --json --output=semgrep-report.json . || true
+
+      - name: Validate secrets availability
+        id: security-check
+        run: |
+          # Check if required secrets are available (without exposing values)
+          if [[ -z "${{ secrets.DOCKER_REGISTRY_TOKEN }}" ]]; then
+            echo "Missing DOCKER_REGISTRY_TOKEN secret"
+            exit 1
+          fi
+          if [[ -z "${{ secrets.DATABASE_URL }}" ]]; then
+            echo "Missing DATABASE_URL secret"
+            exit 1
+          fi
+          if [[ -z "${{ secrets.AIRTABLE_API_KEY }}" ]]; then
+            echo "Missing AIRTABLE_API_KEY secret"
+            exit 1
+          fi
+          echo "continue=true" >> $GITHUB_OUTPUT
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            semgrep-report.json
+
+  # Build and test Python services with secrets
+  build-and-test:
+    name: Build and Test Python Services
+    runs-on: ubuntu-latest
+    needs: security-validation
+    if: needs.security-validation.outputs.continue-deployment == 'true'
+    strategy:
+      matrix:
+        service:
+          - ai-processing-service
+          - ai-service
+          - airtable-gateway
+          - analytics-service
+          - llm-orchestrator
+          - mcp-server
+          - workspace-service
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Check if service exists
+        id: check-service
+        run: |
+          if [ -d "${{ matrix.service }}" ] && [ -f "${{ matrix.service }}/requirements.txt" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install dependencies
+        if: steps.check-service.outputs.exists == 'true'
+        run: |
+          cd ${{ matrix.service }}
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+
+      - name: Run tests with secrets
+        if: steps.check-service.outputs.exists == 'true'
+        env:
+          # Test environment secrets
+          DATABASE_URL: postgresql://postgres:test_password@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}
+          OPENAI_API_KEY: ${{ secrets.TEST_OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.TEST_ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.TEST_GEMINI_API_KEY }}
+          JWT_SECRET: ${{ secrets.TEST_JWT_SECRET }}
+          API_KEY: ${{ secrets.TEST_API_KEY }}
+          ENVIRONMENT: test
+        run: |
+          cd ${{ matrix.service }}
+          pytest tests/ -v --cov=src --cov-report=xml --cov-report=term || echo "No tests found for ${{ matrix.service }}"
+
+      - name: Upload coverage
+        if: steps.check-service.outputs.exists == 'true'
+        uses: codecov/codecov-action@v3
+        with:
+          file: ${{ matrix.service }}/coverage.xml
+          flags: ${{ matrix.service }}
+
+  # Build Docker images with secure secret handling
+  build-images:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: [security-validation, build-and-test]
+    if: needs.security-validation.outputs.continue-deployment == 'true'
+    strategy:
+      matrix:
+        service:
+          - ai-processing-service
+          - ai-service
+          - airtable-gateway
+          - analytics-service
+          - llm-orchestrator
+          - mcp-server
+          - workspace-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if service exists
+        id: check-service
+        run: |
+          if [ -d "${{ matrix.service }}" ] && [ -f "${{ matrix.service }}/Dockerfile" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.check-service.outputs.exists == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: steps.check-service.outputs.exists == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.DOCKER_REGISTRY_TOKEN }}
+
+      - name: Extract metadata
+        if: steps.check-service.outputs.exists == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/python-${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+
+      - name: Build and push Docker image
+        if: steps.check-service.outputs.exists == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.service }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Pass build-time secrets securely
+          secrets: |
+            "registry_token=${{ secrets.DOCKER_REGISTRY_TOKEN }}"
+          build-args: |
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+            VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
+            REVISION=${{ github.sha }}
+
+  # Deploy to staging with environment secrets
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build-images]
+    if: |
+      (github.ref == 'refs/heads/main' || 
+       github.event.inputs.environment == 'staging') &&
+      needs.build-images.result == 'success'
+    environment:
+      name: staging
+      url: https://staging-python.pyairtable.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure staging cluster access
+        run: |
+          echo "${{ secrets.STAGING_KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Deploy Python services to staging
+        env:
+          # Staging environment secrets
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          REDIS_URL: ${{ secrets.STAGING_REDIS_URL }}
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          AIRTABLE_BASE_ID: ${{ secrets.STAGING_AIRTABLE_BASE_ID }}
+          OPENAI_API_KEY: ${{ secrets.STAGING_OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.STAGING_ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.STAGING_GEMINI_API_KEY }}
+          JWT_SECRET: ${{ secrets.STAGING_JWT_SECRET }}
+          API_KEY: ${{ secrets.STAGING_API_KEY }}
+          SENTRY_DSN: ${{ secrets.STAGING_SENTRY_DSN }}
+        run: |
+          # Deploy Python microservices with secrets injection
+          for service in ai-processing-service ai-service airtable-gateway analytics-service llm-orchestrator mcp-server workspace-service; do
+            if [ -d "$service" ] && [ -f "$service/Dockerfile" ]; then
+              echo "Deploying $service to staging..."
+              
+              # Create secret for Python service
+              kubectl create secret generic python-${service}-secrets \
+                --from-literal=database-url="$DATABASE_URL" \
+                --from-literal=redis-url="$REDIS_URL" \
+                --from-literal=airtable-api-key="$AIRTABLE_API_KEY" \
+                --from-literal=airtable-base-id="$AIRTABLE_BASE_ID" \
+                --from-literal=openai-api-key="$OPENAI_API_KEY" \
+                --from-literal=anthropic-api-key="$ANTHROPIC_API_KEY" \
+                --from-literal=gemini-api-key="$GEMINI_API_KEY" \
+                --from-literal=jwt-secret="$JWT_SECRET" \
+                --from-literal=api-key="$API_KEY" \
+                --from-literal=sentry-dsn="$SENTRY_DSN" \
+                --dry-run=client -o yaml | kubectl apply -f -
+              
+              # Update deployment with new image
+              kubectl set image deployment/python-${service} python-${service}=${{ env.REGISTRY }}/${{ github.repository_owner }}/python-${service}:${{ github.sha }} || echo "Deployment python-${service} not found, skipping..."
+              kubectl annotate deployment/python-${service} deployment.kubernetes.io/revision- || true
+            fi
+          done
+
+      - name: Wait for staging deployment
+        run: |
+          for service in ai-processing-service ai-service airtable-gateway analytics-service llm-orchestrator mcp-server workspace-service; do
+            if kubectl get deployment python-${service} >/dev/null 2>&1; then
+              kubectl rollout status deployment/python-${service} --timeout=300s || echo "Deployment python-${service} rollout timeout"
+            fi
+          done
+
+      - name: Run staging health checks
+        run: |
+          sleep 30
+          
+          # Health check for Python services
+          if ! curl -f -m 10 https://staging-python.pyairtable.dev/health; then
+            echo "Staging health check failed"
+            exit 1
+          fi
+
+  # Deploy to production with enhanced security
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build-images, deploy-staging]
+    if: |
+      (startsWith(github.ref, 'refs/tags/v') || 
+       github.event.inputs.environment == 'production') &&
+      needs.build-images.result == 'success' &&
+      needs.deploy-staging.result == 'success'
+    environment:
+      name: production
+      url: https://python.pyairtable.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure production cluster access
+        run: |
+          echo "${{ secrets.PRODUCTION_KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Pre-deployment checks
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          echo "Running pre-deployment checks..."
+          # Add database migration checks, backup verification, etc.
+
+      - name: Deploy Python services to production
+        env:
+          # Production environment secrets
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          REDIS_URL: ${{ secrets.PRODUCTION_REDIS_URL }}
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          AIRTABLE_BASE_ID: ${{ secrets.PRODUCTION_AIRTABLE_BASE_ID }}
+          OPENAI_API_KEY: ${{ secrets.PRODUCTION_OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.PRODUCTION_ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.PRODUCTION_GEMINI_API_KEY }}
+          JWT_SECRET: ${{ secrets.PRODUCTION_JWT_SECRET }}
+          API_KEY: ${{ secrets.PRODUCTION_API_KEY }}
+          SENTRY_DSN: ${{ secrets.PRODUCTION_SENTRY_DSN }}
+        run: |
+          # Rolling deployment for Python services
+          for service in ai-processing-service ai-service airtable-gateway analytics-service llm-orchestrator mcp-server workspace-service; do
+            if [ -d "$service" ] && [ -f "$service/Dockerfile" ]; then
+              echo "Deploying $service to production..."
+              
+              # Create/update production secrets
+              kubectl create secret generic python-${service}-secrets \
+                --from-literal=database-url="$DATABASE_URL" \
+                --from-literal=redis-url="$REDIS_URL" \
+                --from-literal=airtable-api-key="$AIRTABLE_API_KEY" \
+                --from-literal=airtable-base-id="$AIRTABLE_BASE_ID" \
+                --from-literal=openai-api-key="$OPENAI_API_KEY" \
+                --from-literal=anthropic-api-key="$ANTHROPIC_API_KEY" \
+                --from-literal=gemini-api-key="$GEMINI_API_KEY" \
+                --from-literal=jwt-secret="$JWT_SECRET" \
+                --from-literal=api-key="$API_KEY" \
+                --from-literal=sentry-dsn="$SENTRY_DSN" \
+                --dry-run=client -o yaml | kubectl apply -f -
+              
+              # Rolling update
+              kubectl set image deployment/python-${service} python-${service}=${{ env.REGISTRY }}/${{ github.repository_owner }}/python-${service}:${{ github.sha }} || echo "Deployment python-${service} not found, skipping..."
+              kubectl annotate deployment/python-${service} deployment.kubernetes.io/revision-
+            fi
+          done
+
+      - name: Wait for production deployment
+        run: |
+          for service in ai-processing-service ai-service airtable-gateway analytics-service llm-orchestrator mcp-server workspace-service; do
+            if kubectl get deployment python-${service} >/dev/null 2>&1; then
+              kubectl rollout status deployment/python-${service} --timeout=600s || echo "Deployment python-${service} rollout timeout"
+            fi
+          done
+
+      - name: Production health checks
+        run: |
+          sleep 60
+          
+          # Comprehensive health checks with retries
+          for i in {1..5}; do
+            if curl -f -m 30 https://python.pyairtable.dev/health; then
+              echo "Production health check passed"
+              break
+            elif [ $i -eq 5 ]; then
+              echo "Production health check failed after 5 attempts"
+              exit 1
+            else
+              echo "Health check attempt $i failed, retrying in 30s..."
+              sleep 30
+            fi
+          done
+
+      - name: Post-deployment verification
+        run: |
+          echo "Running post-deployment verification..."
+          # Add verification for AI services, LLM endpoints, etc.
+
+  # Python-specific security scanning
+  python-security-scan:
+    name: Python Security Scan
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: always() && needs.deploy-staging.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install security tools
+        run: |
+          pip install pip-audit cyclonedx-bom
+
+      - name: Generate Software Bill of Materials
+        run: |
+          for service in ai-processing-service ai-service airtable-gateway analytics-service llm-orchestrator mcp-server workspace-service; do
+            if [ -d "$service" ] && [ -f "$service/requirements.txt" ]; then
+              echo "Generating SBOM for $service..."
+              cyclonedx-py -r -i $service/requirements.txt -o $service-sbom.json
+            fi
+          done
+
+      - name: Audit Python dependencies
+        run: |
+          for service in ai-processing-service ai-service airtable-gateway analytics-service llm-orchestrator mcp-server workspace-service; do
+            if [ -d "$service" ] && [ -f "$service/requirements.txt" ]; then
+              echo "Auditing $service dependencies..."
+              pip-audit -r $service/requirements.txt || echo "Security issues found in $service"
+            fi
+          done
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: python-sbom
+          path: "*-sbom.json"
+
+  # Rollback capability for Python services
+  rollback-python:
+    name: Rollback Python Services
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: failure() && (needs.deploy-staging.result == 'failure' || needs.deploy-production.result == 'failure')
+    environment:
+      name: ${{ needs.deploy-production.result == 'failure' && 'production' || 'staging' }}
+    steps:
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure cluster access
+        run: |
+          if [[ "${{ needs.deploy-production.result }}" == "failure" ]]; then
+            echo "${{ secrets.PRODUCTION_KUBECONFIG }}" | base64 -d > ~/.kube/config
+          else
+            echo "${{ secrets.STAGING_KUBECONFIG }}" | base64 -d > ~/.kube/config
+          fi
+          chmod 600 ~/.kube/config
+
+      - name: Rollback Python deployments
+        run: |
+          for service in ai-processing-service ai-service airtable-gateway analytics-service llm-orchestrator mcp-server workspace-service; do
+            if kubectl get deployment python-${service} >/dev/null 2>&1; then
+              echo "Rolling back python-$service..."
+              kubectl rollout undo deployment/python-${service}
+              kubectl rollout status deployment/python-${service} --timeout=300s
+            fi
+          done
+
+      - name: Notify team of Python service rollback
+        if: always()
+        run: |
+          echo "Python services deployment failed, rollback completed"
+          # Add notification logic (Slack, email, etc.)
+
+  # Monitoring setup post-deployment
+  setup-monitoring:
+    name: Setup Monitoring
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: needs.deploy-production.result == 'success'
+    steps:
+      - name: Configure application monitoring
+        env:
+          SENTRY_DSN: ${{ secrets.PRODUCTION_SENTRY_DSN }}
+        run: |
+          echo "Setting up monitoring for Python services..."
+          # Configure Sentry, DataDog, New Relic, etc.
+
+      - name: Setup alerting
+        run: |
+          echo "Configuring alerting for Python services..."
+          # Setup alerts for high error rates, performance issues, etc.

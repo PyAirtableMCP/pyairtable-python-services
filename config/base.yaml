@@ -39,7 +39,7 @@ http_client:
 
 security:
   api_key_required: "${API_KEY_REQUIRED:true}"
-  jwt_secret: "${JWT_SECRET:changeme-in-production}"
+  jwt_secret: "${JWT_SECRET}"
   jwt_algorithm: "${JWT_ALGORITHM:HS256}"
   jwt_expiry: "${JWT_EXPIRY:24h}"
   session_ttl: "${SESSION_TTL:3600}"
