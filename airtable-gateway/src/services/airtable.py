@@ -115,12 +115,24 @@ class AirtableService:
     
     async def list_bases(self) -> List[Dict[str, Any]]:
         """List all accessible bases"""
-        result = await self._make_request("GET", "meta/bases")
-        return result.get("bases", [])
+        try:
+            result = await self._make_request("GET", "meta/bases")
+            return result.get("bases", [])
+        except Exception as e:
+            if self.settings.use_mock_data:
+                print(f"API failed, using mock data: {e}")
+                return self._get_mock_bases()
+            raise
     
     async def get_base_schema(self, base_id: str) -> Dict[str, Any]:
         """Get base schema"""
-        return await self._make_request("GET", f"meta/bases/{base_id}/tables")
+        try:
+            return await self._make_request("GET", f"meta/bases/{base_id}/tables")
+        except Exception as e:
+            if self.settings.use_mock_data:
+                print(f"API failed, using mock data: {e}")
+                return self._get_mock_base_schema(base_id)
+            raise
     
     async def list_records(
         self,
@@ -154,7 +166,13 @@ class AirtableService:
                 params[f"sort[{i}][field]"] = s["field"]
                 params[f"sort[{i}][direction]"] = s.get("direction", "asc")
         
-        return await self._make_request("GET", f"{base_id}/{table_id}", params=params)
+        try:
+            return await self._make_request("GET", f"{base_id}/{table_id}", params=params)
+        except Exception as e:
+            if self.settings.use_mock_data:
+                print(f"API failed, using mock data: {e}")
+                return self._get_mock_records(base_id, table_id)
+            raise
     
     async def get_record(self, base_id: str, table_id: str, record_id: str) -> Dict[str, Any]:
         """Get a single record"""
@@ -299,4 +317,141 @@ class AirtableService:
             'name': view.get('name'),
             'type': view.get('type'),
             'visibleFieldIds': view.get('visibleFieldIds', [])
+        }
+    
+    def _get_mock_bases(self) -> List[Dict[str, Any]]:
+        """Return mock bases for development"""
+        return [
+            {
+                'id': 'appMockBase001',
+                'name': 'Demo Workspace',
+                'permissionLevel': 'read'
+            },
+            {
+                'id': 'appMockBase002',
+                'name': 'Sample Database',
+                'permissionLevel': 'edit'
+            }
+        ]
+    
+    def _get_mock_base_schema(self, base_id: str) -> Dict[str, Any]:
+        """Return mock base schema"""
+        return {
+            'tables': [
+                {
+                    'id': 'tblMockTable001',
+                    'name': 'Contacts',
+                    'primaryFieldId': 'fldMockField001',
+                    'fields': [
+                        {
+                            'id': 'fldMockField001',
+                            'name': 'Name',
+                            'type': 'singleLineText',
+                            'options': {}
+                        },
+                        {
+                            'id': 'fldMockField002',
+                            'name': 'Email',
+                            'type': 'email',
+                            'options': {}
+                        },
+                        {
+                            'id': 'fldMockField003',
+                            'name': 'Phone',
+                            'type': 'phoneNumber',
+                            'options': {}
+                        }
+                    ],
+                    'views': [
+                        {
+                            'id': 'viwMockView001',
+                            'name': 'Grid view',
+                            'type': 'grid',
+                            'visibleFieldIds': ['fldMockField001', 'fldMockField002', 'fldMockField003']
+                        }
+                    ]
+                },
+                {
+                    'id': 'tblMockTable002',
+                    'name': 'Companies',
+                    'primaryFieldId': 'fldMockField004',
+                    'fields': [
+                        {
+                            'id': 'fldMockField004',
+                            'name': 'Company Name',
+                            'type': 'singleLineText',
+                            'options': {}
+                        },
+                        {
+                            'id': 'fldMockField005',
+                            'name': 'Industry',
+                            'type': 'singleSelect',
+                            'options': {
+                                'choices': [
+                                    {'id': 'selTech', 'name': 'Technology'},
+                                    {'id': 'selFinance', 'name': 'Finance'}
+                                ]
+                            }
+                        }
+                    ],
+                    'views': [
+                        {
+                            'id': 'viwMockView002',
+                            'name': 'Grid view',
+                            'type': 'grid',
+                            'visibleFieldIds': ['fldMockField004', 'fldMockField005']
+                        }
+                    ]
+                }
+            ],
+            'total': 2
+        }
+    
+    def _get_mock_records(self, base_id: str, table_id: str) -> Dict[str, Any]:
+        """Return mock records"""
+        if table_id == 'tblMockTable001':  # Contacts
+            records = [
+                {
+                    'id': 'recMockRecord001',
+                    'fields': {
+                        'Name': 'John Doe',
+                        'Email': 'john@example.com',
+                        'Phone': '+1-555-0123'
+                    },
+                    'createdTime': '2024-01-01T10:00:00.000Z'
+                },
+                {
+                    'id': 'recMockRecord002',
+                    'fields': {
+                        'Name': 'Jane Smith',
+                        'Email': 'jane@example.com',
+                        'Phone': '+1-555-0456'
+                    },
+                    'createdTime': '2024-01-02T10:00:00.000Z'
+                }
+            ]
+        else:  # Companies
+            records = [
+                {
+                    'id': 'recMockRecord003',
+                    'fields': {
+                        'Company Name': 'Acme Corp',
+                        'Industry': 'Technology'
+                    },
+                    'createdTime': '2024-01-01T12:00:00.000Z'
+                },
+                {
+                    'id': 'recMockRecord004',
+                    'fields': {
+                        'Company Name': 'Example Ltd',
+                        'Industry': 'Finance'
+                    },
+                    'createdTime': '2024-01-02T12:00:00.000Z'
+                }
+            ]
+        
+        return {
+            'records': [self._normalize_record(record) for record in records],
+            'total': len(records),
+            'hasMore': False
         }

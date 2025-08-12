@@ -51,7 +51,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         
         # Check for internal API key (for service-to-service calls)
-        api_key = request.headers.get("X-API-Key")
+        api_key = request.headers.get("X-API-Key") or request.headers.get("X-Internal-API-Key")
         if api_key and self.internal_api_key and api_key == self.internal_api_key:
             return await call_next(request)
         

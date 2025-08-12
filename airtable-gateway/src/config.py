@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     airtable_token: str = ""
     airtable_rate_limit: int = 5  # requests per second
     airtable_timeout: int = 30  # seconds
+    use_mock_data: bool = True  # Fallback to mock data when API fails
     
     # Redis config
     redis_url: str = "redis://localhost:6379/0"

@@ -43,6 +43,31 @@ async def get_base_schema(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/bases/{base_id}/tables")
+async def list_tables(
+    base_id: str,
+    service: AirtableService = Depends(get_airtable_service)
+) -> Dict[str, Any]:
+    """List tables for a specific base"""
+    try:
+        schema = await service.get_base_schema(base_id)
+        # Transform schema response to match expected table list format
+        tables = []
+        for table in schema.get("tables", []):
+            tables.append({
+                "id": table.get("id"),
+                "name": table.get("name"),
+                "recordCount": None  # Record count not available in schema endpoint
+            })
+        
+        return {
+            "tables": tables,
+            "total": len(tables)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/bases/{base_id}/tables/{table_id}/records")
 async def list_records(
     base_id: str,

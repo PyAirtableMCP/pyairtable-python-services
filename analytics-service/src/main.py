@@ -9,28 +9,37 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 from routes import health
+from config import get_settings
+from dependencies import close_database_engine, close_redis_client
 
 # App lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    print(f"Starting analytics-service...")
+    settings = get_settings()
+    print(f"Starting {settings.service_name} v{settings.service_version}...")
+    print(f"Environment: {settings.environment}")
+    print(f"Database URL: {settings.get_async_database_url()}")
+    print(f"Redis URL: {settings.redis_url}")
     yield
     # Shutdown
-    print(f"Shutting down analytics-service...")
+    print(f"Shutting down {settings.service_name}...")
+    await close_database_engine()
+    await close_redis_client()
 
 # Create FastAPI app
+settings = get_settings()
 app = FastAPI(
-    title="analytics-service",
-    description="Analytics and reporting",
-    version="1.0.0",
+    title=settings.service_name,
+    description="Analytics and reporting for PyAirtable platform",
+    version=settings.service_version,
     lifespan=lifespan
 )
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.get_cors_origins_list(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -51,26 +60,27 @@ app.include_router(health.router, tags=["health"])
 @app.get("/")
 async def root():
     return {
-        "service": "analytics-service",
-        "version": "1.0.0",
-        "description": "Analytics and reporting"
+        "service": settings.service_name,
+        "version": settings.service_version,
+        "description": "Analytics and reporting for PyAirtable platform",
+        "environment": settings.environment
     }
 
 # Service info endpoint
 @app.get("/api/v1/info")
 async def info():
     return {
-        "service": "analytics-service",
-        "version": "1.0.0",
-        "description": "Analytics and reporting",
-        "port": 8100
+        "service": settings.service_name,
+        "version": settings.service_version,
+        "description": "Analytics and reporting for PyAirtable platform",
+        "port": settings.port,
+        "environment": settings.environment
     }
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8100"))
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=port,
-        reload=os.getenv("ENV", "production") == "development"
+        host=settings.host,
+        port=settings.port,
+        reload=settings.environment == "development"
     )
