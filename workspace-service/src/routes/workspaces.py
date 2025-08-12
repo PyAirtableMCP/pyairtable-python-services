@@ -7,6 +7,7 @@ import structlog
 from dependencies import get_db
 from middleware.auth import get_current_user_id, verify_api_key
 from services.workspace_service import WorkspaceService
+from config import get_workspace_config
 from models.schemas import (
     WorkspaceCreate, WorkspaceUpdate, Workspace, WorkspaceList,
     WorkspaceMemberCreate, WorkspaceMemberUpdate, WorkspaceMember,
@@ -50,12 +51,19 @@ async def create_workspace(
 @router.get("/workspaces", response_model=WorkspaceListResponse)
 async def list_workspaces(
     page: int = Query(1, ge=1, description="Page number"),
-    limit: int = Query(20, ge=1, le=100, description="Items per page"),
+    limit: int = Query(None, description="Items per page"),
     db: AsyncSession = Depends(get_db),
     current_user_id: str = Depends(get_current_user_id)
 ):
     """List user's workspaces with pagination"""
     try:
+        config = get_workspace_config()
+        # Use configured defaults if not provided
+        if limit is None:
+            limit = config.pagination_default
+        # Enforce maximum limit
+        limit = min(limit, config.pagination_max)
+        
         service = WorkspaceService(db)
         skip = (page - 1) * limit
         workspaces, total = await service.get_user_workspaces(

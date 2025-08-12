@@ -1,0 +1,52 @@
+# Production environment configuration
+
+application:
+  environment: "production"
+
+database:
+  echo_sql: false       # Disable SQL logging in production
+  pool_size: 20         # Larger pool for production load
+  timeout: 10           # Stricter timeout for production
+
+redis:
+  timeout: 3            # Stricter timeout
+  max_connections: 50   # Higher connection limit for production
+
+logging:
+  level: "INFO"         # Standard logging level
+  format: "json"        # Structured logging for production
+
+security:
+  api_key_required: true    # Always require API key in production
+  jwt_expiry: "1h"          # Shorter expiry for better security
+  session_ttl: 1800         # 30 minutes session timeout
+
+monitoring:
+  health_check_interval: 30     # More frequent health checks
+  metrics_enabled: true
+
+features:
+  rate_limiting_enabled: true       # Enable rate limiting
+  request_tracing_enabled: true     # Enable for observability
+
+# Production-specific resource limits
+pagination:
+  default_limit: 10     # Conservative default for production
+  max_limit: 50         # Lower max to prevent large queries
+
+batch_processing:
+  default_size: 3       # Smaller batches for consistent performance
+  max_size: 10          # Conservative max size
+
+# Stricter workspace limits for production
+workspace:
+  max_workspaces_per_user: 25
+  max_members_per_workspace: 50
+  
+rate_limits:
+  workspace_creation_per_hour: 5     # Conservative rate limiting
+  invitation_sends_per_hour: 20
+
+http_client:
+  timeout: 3.0              # Stricter timeout
+  retry_attempts: 2         # Fewer retries

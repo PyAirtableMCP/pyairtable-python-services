@@ -15,6 +15,7 @@ from models.schemas import (
     WorkspaceMemberCreate, WorkspaceMemberUpdate,
     WorkspaceInvitationCreate
 )
+from config import get_workspace_config
 
 
 class WorkspaceService:
@@ -22,6 +23,7 @@ class WorkspaceService:
     
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.config = get_workspace_config()
     
     async def create_workspace(self, workspace_data: WorkspaceCreate, owner_id: str) -> Workspace:
         """Create a new workspace"""
@@ -30,7 +32,7 @@ class WorkspaceService:
             select(func.count(Workspace.id)).where(Workspace.owner_id == owner_id)
         )
         
-        if user_workspace_count >= 50:  # Default limit from settings
+        if user_workspace_count >= self.config.max_workspaces_per_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Maximum workspace limit reached"
@@ -195,7 +197,7 @@ class WorkspaceService:
             )
         )
         
-        if member_count >= workspace.max_members:
+        if member_count >= self.config.max_members_per_workspace:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Workspace member limit reached"
@@ -341,9 +343,9 @@ class WorkspaceService:
             email=invitation_data.email,
             role=invitation_data.role,
             invited_by_user_id=user_id,
-            invitation_token=secrets.token_urlsafe(32),
+            invitation_token=secrets.token_urlsafe(self.config.invitation_token_length),
             message=invitation_data.message,
-            expires_at=datetime.utcnow() + timedelta(days=7)  # 7 days expiration
+            expires_at=datetime.utcnow() + timedelta(days=self.config.invitation_expiry_days)
         )
         
         self.db.add(invitation)

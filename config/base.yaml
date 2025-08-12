@@ -1,0 +1,58 @@
+# Base configuration for all pyairtable services
+# Environment variables can be interpolated using ${VAR_NAME:default_value} syntax
+
+application:
+  name: "${SERVICE_NAME}"
+  version: "${SERVICE_VERSION:1.0.0}"
+  environment: "${ENVIRONMENT:development}"
+
+server:
+  host: "${HOST:0.0.0.0}"
+  port: "${PORT:8000}"
+  timeout: "${SERVER_TIMEOUT:30}"
+  cors_origins: "${CORS_ORIGINS:*}"
+
+database:
+  url: "${DATABASE_URL}"
+  pool_size: "${DB_POOL_SIZE:10}"
+  timeout: "${DB_TIMEOUT:30}"
+  echo_sql: "${DB_ECHO:false}"
+
+redis:
+  url: "${REDIS_URL:redis://localhost:6379/0}"
+  password: "${REDIS_PASSWORD:}"
+  timeout: "${REDIS_TIMEOUT:5}"
+  max_connections: "${REDIS_MAX_CONNECTIONS:10}"
+
+pagination:
+  default_limit: "${PAGINATION_DEFAULT:20}"
+  max_limit: "${PAGINATION_MAX:100}"
+  
+batch_processing:
+  default_size: "${BATCH_SIZE:5}"
+  max_size: "${BATCH_MAX_SIZE:50}"
+
+http_client:
+  timeout: "${HTTP_TIMEOUT:5.0}"
+  retry_attempts: "${HTTP_RETRY_ATTEMPTS:3}"
+  retry_backoff: "${HTTP_RETRY_BACKOFF:1.0}"
+
+security:
+  api_key_required: "${API_KEY_REQUIRED:true}"
+  jwt_secret: "${JWT_SECRET:changeme-in-production}"
+  jwt_algorithm: "${JWT_ALGORITHM:HS256}"
+  jwt_expiry: "${JWT_EXPIRY:24h}"
+  session_ttl: "${SESSION_TTL:3600}"
+
+logging:
+  level: "${LOG_LEVEL:INFO}"
+  format: "${LOG_FORMAT:json}"
+  enable_correlation_id: "${LOG_CORRELATION_ID:true}"
+
+monitoring:
+  metrics_enabled: "${METRICS_ENABLED:true}"
+  health_check_interval: "${HEALTH_CHECK_INTERVAL:30}"
+  
+features:
+  rate_limiting_enabled: "${RATE_LIMITING:true}"
+  request_tracing_enabled: "${REQUEST_TRACING:false}"

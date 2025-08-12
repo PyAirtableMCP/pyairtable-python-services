@@ -1,0 +1,38 @@
+# Development environment overrides
+
+application:
+  environment: "development"
+
+server:
+  port: 8003  # Workspace service default port
+
+database:
+  echo_sql: true  # Enable SQL logging in development
+  pool_size: 5    # Smaller pool for local development
+
+redis:
+  timeout: 10     # More lenient timeout for development
+
+logging:
+  level: "DEBUG"
+  format: "pretty"  # Human-readable logs for development
+
+security:
+  api_key_required: false  # Disable API key requirement for easier testing
+  jwt_expiry: "7d"        # Longer expiry for development convenience
+
+monitoring:
+  health_check_interval: 60  # Less frequent health checks
+
+features:
+  rate_limiting_enabled: false      # Disable rate limiting for testing
+  request_tracing_enabled: true     # Enable tracing for debugging
+
+# More lenient limits for development
+workspace:
+  max_workspaces_per_user: 100
+  max_members_per_workspace: 200
+
+rate_limits:
+  workspace_creation_per_hour: 100
+  invitation_sends_per_hour: 100

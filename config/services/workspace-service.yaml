@@ -1,0 +1,43 @@
+# Workspace Service Specific Configuration
+
+workspace:
+  max_workspaces_per_user: "${MAX_WORKSPACES:50}"
+  max_members_per_workspace: "${MAX_MEMBERS:100}"
+  default_template: "${DEFAULT_WORKSPACE_TEMPLATE:blank}"
+  
+  # Invitation settings
+  invitation_expiry_days: "${INVITATION_EXPIRY:7}"
+  invitation_token_length: "${INVITATION_TOKEN_LENGTH:32}"
+  
+  # Validation rules
+  min_name_length: "${WORKSPACE_MIN_NAME:3}"
+  max_name_length: "${WORKSPACE_MAX_NAME:100}"
+  max_description_length: "${WORKSPACE_MAX_DESC:500}"
+
+permissions:
+  # Default member permissions for new workspaces
+  default_member_can_edit: "${DEFAULT_MEMBER_EDIT:true}"
+  default_member_can_delete: "${DEFAULT_MEMBER_DELETE:false}"  
+  default_member_can_invite: "${DEFAULT_MEMBER_INVITE:false}"
+  
+  # Owner permissions (always true, but configurable for testing)
+  owner_can_edit: "${OWNER_CAN_EDIT:true}"
+  owner_can_delete: "${OWNER_CAN_DELETE:true}"
+  owner_can_invite: "${OWNER_CAN_INVITE:true}"
+
+templates:
+  available_templates:
+    - "blank"
+    - "data_analysis" 
+    - "project_management"
+    - "crm"
+    - "content_calendar"
+    
+rate_limits:
+  workspace_creation_per_hour: "${WORKSPACE_CREATION_LIMIT:10}"
+  invitation_sends_per_hour: "${INVITATION_LIMIT:50}"
+
+# Override base pagination for workspace-specific endpoints
+pagination:
+  default_limit: "${WORKSPACE_PAGINATION_DEFAULT:20}"
+  max_limit: "${WORKSPACE_PAGINATION_MAX:50}"
